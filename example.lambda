@@ -1,1 +1,1 @@
-let id = \x -> x in id 8
+let id = \x -> x in if (gte (id 8) 42) 8 42

@@ -9,7 +9,7 @@ pub enum Expr {
     Let(String, Box<Expr>, Box<Expr>),
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
 pub enum Lit {
     Int(i32),
     Bool(bool),
@@ -25,8 +25,27 @@ pub enum Type {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
 pub struct Scheme {
-    vars: Vec<String>,
-    ty: Type,
+    pub vars: Vec<String>,
+    pub ty: Type,
+}
+
+impl Display for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Expr::Var(var) => write!(f, "{}", var),
+            Expr::Lit(Lit::Int(int)) => write!(f, "{int}"),
+            Expr::Lit(Lit::Bool(bool)) => write!(f, "{bool}"),
+            Expr::App(e1, e2) => {
+                if let (_, Expr::App(_, _)) = (&**e1, &**e2) {
+                    write!(f, "{e1} ({e2})")
+                } else {
+                    write!(f, "{e1} {e2}")
+                }
+            }
+            Expr::Lam(n, b) => write!(f, "\\{n} -> {b}"),
+            Expr::Let(n, e1, e2) => write!(f, "let {n} = {e1} in\n{e2}"),
+        }
+    }
 }
 
 impl Display for Type {
