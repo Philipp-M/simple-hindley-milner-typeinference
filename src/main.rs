@@ -3,19 +3,34 @@ mod ast;
 mod parser;
 mod typechecker;
 
-use std::{env, fs};
+use std::{env, fs, io};
 use typechecker::test_type_inference;
 
 use crate::parser::parse;
 
-fn main() {
-    let src = fs::read_to_string(env::args().nth(1).expect("Expected file argument"))
-        .expect("Failed to read file");
-    let expr = parse(&src);
-    println!("The expression:\n");
-    println!("{expr}");
-    println!("\nhas type:\n");
-    println!("{}", test_type_inference(&expr));
+fn main() -> Result<(), io::Error> {
+    fn print_expression_and_type(src: &str) {
+        let expr = parse(src);
+        println!("\nThe expression:");
+        println!("{expr}");
+        println!("\nhas type:");
+        println!("{}", test_type_inference(&expr));
+    }
+    if env::args().len() > 1 {
+        let src = fs::read_to_string(env::args().nth(1).expect("Expected file argument"))
+            .expect("Failed to read file");
+        print_expression_and_type(&src);
+    } else {
+        loop {
+            let mut line = String::new();
+            io::stdin().read_line(&mut line)?;
+            if line.trim().is_empty() {
+                return Ok(());
+            }
+            print_expression_and_type(&line);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
