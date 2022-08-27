@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet},
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -7,14 +7,20 @@ use crate::ast::{Expr, Lit, Scheme, Type};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-type Substitution = HashMap<String, Type>;
+type Substitution = BTreeMap<String, Type>;
 
-type Context = HashMap<String, Scheme>;
+type Context = BTreeMap<String, Scheme>;
 
 fn empty_subst() -> Substitution {
     Substitution::new()
 }
 
+/// substitute subst in ty
+///
+/// example:
+/// subst = { "a" => Int, "b" => Int -> Int }
+/// ty = "a" -> "b" -> "a" -> "c"
+/// apply_subst(subst, ty) = Int -> (Int -> Int) -> Int -> "c"
 fn apply_subst(subst: &Substitution, ty: &Type) -> Type {
     match ty {
         Type::Var(var) => subst.get(var).unwrap_or(ty).clone(),
@@ -26,61 +32,88 @@ fn apply_subst(subst: &Substitution, ty: &Type) -> Type {
     }
 }
 
+/// substitute subst in scheme
+///
+/// example:
+/// subst = { "a" => Int -> Bool, "b" => Bool }
+/// scheme = ∀ "a". ("a" -> "b" -> "b"),
+/// apply_subst_scheme(subst, scheme) = ∀ "a". ("a" -> Bool -> Bool)
 fn apply_subst_scheme(subst: &Substitution, mut scheme: Scheme) -> Scheme {
-    // The fold takes care of name shadowing
-    let shadowed_subst = scheme.vars.iter().rfold(subst.clone(), |mut subst, var| {
+    // The fold takes care of bound vars in scheme.ty
+    let subst_without_bound_vars = scheme.vars.iter().rfold(subst.clone(), |mut subst, var| {
         subst.remove(var);
         subst
     });
-    scheme.ty = apply_subst(&shadowed_subst, &scheme.ty);
+    scheme.ty = apply_subst(&subst_without_bound_vars, &scheme.ty);
     scheme
 }
 
+/// substitute all vars in s2 with s1 and extends s1 with this substitution (overwriting substitutions in s1 if they exist)
+///
+/// example:
+/// s1 = { "a" => Int, "c" => Int -> Bool }
+/// s2 = { "a" => Bool, "b" => Int -> "c" }
+/// compose_subst(s1, s2) = { "a" => Bool, "b" => Int -> Int -> Bool, "c" => Int -> Bool }
 fn compose_subst(s1: &Substitution, s2: &Substitution) -> Substitution {
     let substituted =
-        s2.clone().into_iter().map(|(k, v)| (k, apply_subst(s1, &v))).collect::<HashMap<_, _>>();
+        s2.clone().into_iter().map(|(k, v)| (k, apply_subst(s1, &v))).collect::<BTreeMap<_, _>>();
     let mut composed = s1.clone();
     composed.extend(substituted);
     composed
 }
 
+/// creates a new unique free type var
+///
+/// example: Var("%42")
 fn new_ty_var() -> Type {
     let count = COUNTER.fetch_add(1, Ordering::Relaxed);
     Type::Var(format!("%{count}"))
 }
 
-fn free_type_vars(ty: &Type) -> HashSet<String> {
+/// get all vars in type
+///
+/// example:
+/// ty = Int -> "a" -> Bool -> "b" -> "a"
+/// free_type_vars(ty) = { "a", "b" }
+fn free_type_vars(ty: &Type) -> BTreeSet<String> {
     match ty {
-        Type::Var(var) => HashSet::from([var.clone()]),
+        Type::Var(var) => BTreeSet::from([var.clone()]),
         Type::Fun(t1, t2) => {
             let mut s = free_type_vars(t1);
             s.extend(free_type_vars(t2));
             s
         }
-        _ => HashSet::new(),
+        _ => BTreeSet::new(),
     }
 }
 
-fn free_type_vars_scheme(scheme: Scheme) -> HashSet<String> {
+/// get all free vars in scheme
+///
+/// example:
+/// scheme = ∀ "a". (Int -> "a" -> Bool -> "b" -> "c")
+/// free_type_vars_scheme(scheme) = { "b", "c" }
+fn free_type_vars_scheme(scheme: Scheme) -> BTreeSet<String> {
     let s1 = free_type_vars(&scheme.ty);
-    s1.difference(&HashSet::from_iter(scheme.vars.iter().cloned())).map(Into::into).collect()
+    s1.difference(&BTreeSet::from_iter(scheme.vars.iter().cloned())).map(Into::into).collect()
 }
 
-fn var_bind(var: String, ty: &Type) -> Substitution {
-    if free_type_vars(ty).contains(&var) {
-        panic!("occurs check failed");
-    } else if ty == &Type::Var(var.clone()) {
-        empty_subst()
-    } else {
-        HashMap::from([(var, ty.clone())])
-    }
-}
-
+/// if ty1 and ty2 unify unify(ty1, ty2) returns substitution S such that apply_subst(S, ty1) == apply_subst(S, ty2)
+/// otherwise it (currently) panics
 fn unify(ty1: &Type, ty2: &Type) -> Substitution {
     match (ty1, ty2) {
-        (Type::Int, Type::Int) => empty_subst(),
-        (Type::Bool, Type::Bool) => empty_subst(),
-        (Type::Var(u), t) | (t, Type::Var(u)) => var_bind(u.clone(), t),
+        // primitive types
+        (Type::Int, Type::Int) | (Type::Bool, Type::Bool) => empty_subst(),
+        // same variables
+        (Type::Var(u), Type::Var(v)) if u == v => empty_subst(),
+        // t contains var v (no unification, recursive var)
+        (Type::Var(v), t) | (t, Type::Var(v)) if free_type_vars(t).contains(v) => {
+            panic!("occurs check failed: type {t} contains {v}")
+        }
+        // v can be substituted by t
+        (Type::Var(v), t) | (t, Type::Var(v)) => BTreeMap::from([(v.clone(), t.clone())]),
+        // example:
+        // t1: Var("a") -> Var("b"), t2: Int -> Bool
+        // unify(t1, t2) = { "a" => Int, "b" => Bool }
         (Type::Fun(l1, r1), Type::Fun(l2, r2)) => {
             let s1 = unify(l1, l2);
             let s2 = unify(&apply_subst(&s1, r1), &apply_subst(&s1, r2));
@@ -90,11 +123,22 @@ fn unify(ty1: &Type, ty2: &Type) -> Substitution {
     }
 }
 
+/// substitute subst in context
+///
+/// example:
+/// subst = { "a" => Int -> Bool, "b" => Bool }
+/// context = { f => ∀ "a". ("a" -> "b" -> "b"), id = ∀ "a". ("a" -> "a") },
+/// apply_subst_ctx(subst, context) = { f => ∀ "a". ("a" -> Bool -> "b"), id = ∀ "a". ("a" -> "a") }
 fn apply_subst_ctx(subst: &Substitution, context: Context) -> Context {
     context.into_iter().map(|(k, v)| (k, apply_subst_scheme(subst, v))).collect()
 }
 
-fn free_type_vars_ctx(context: Context) -> HashSet<String> {
+/// get all free vars in context
+///
+/// example:
+/// context = { f => ∀ "a". ("a" -> "b" -> "b"), id = ∀ "a". ("a" -> "a") },
+/// free_type_vars_scheme(scheme) = { "b" }
+fn free_type_vars_ctx(context: Context) -> BTreeSet<String> {
     context
         .into_values()
         .map(free_type_vars_scheme)
@@ -105,11 +149,24 @@ fn free_type_vars_ctx(context: Context) -> HashSet<String> {
         .unwrap_or_default()
 }
 
+/// create a forall binding for all free vars in ty, which are not free (or non-existent) in context
+///
+/// example:
+/// context = { f => ∀ "a". ("a" -> "b" -> "b"), id = ∀ "a". ("a" -> "a") },
+/// ty = ∀ "a". ("a" -> "b" -> "c")
+/// generalize(context, ty) => ∀ "a" "c". ("a" -> "b" -> "c")
+///
 fn generalize(context: Context, ty: Type) -> Scheme {
     let vars = free_type_vars(&ty).difference(&free_type_vars_ctx(context)).cloned().collect();
     Scheme { vars, ty }
 }
 
+/// replaces bound vars in scheme with new free vars
+///
+/// example:
+///
+/// scheme = ∀ "a". ("a" -> "b" -> "b"),
+/// instantiate(scheme) = "%1" -> "b" -> "b"
 fn instantiate(scheme: Scheme) -> Type {
     apply_subst(&scheme.vars.into_iter().map(|v| (v, new_ty_var())).collect(), &scheme.ty)
 }
@@ -121,6 +178,7 @@ fn infer_literal(lit: &Lit) -> (Substitution, Type) {
     }
 }
 
+/// Algorithm W
 fn infer(ctx: &Context, expr: &Expr) -> (Substitution, Type) {
     match expr {
         Expr::Var(var) => (
@@ -132,7 +190,8 @@ fn infer(ctx: &Context, expr: &Expr) -> (Substitution, Type) {
         Expr::App(fun, arg) => {
             let ty_res = new_ty_var();
             let (s1, ty_fun) = infer(ctx, fun);
-            let (s2, ty_arg) = infer(&apply_subst_ctx(&s1, ctx.clone()), arg);
+            let tmp_ctx = &apply_subst_ctx(&s1, ctx.clone());
+            let (s2, ty_arg) = infer(tmp_ctx, arg);
             let s3 =
                 unify(&apply_subst(&s2, &ty_fun), &Type::Fun(ty_arg.into(), ty_res.clone().into()));
             (compose_subst(&s3, &compose_subst(&s2, &s1)), apply_subst(&s3, &ty_res))
@@ -147,20 +206,29 @@ fn infer(ctx: &Context, expr: &Expr) -> (Substitution, Type) {
         }
         Expr::Let(binder, binding, body) => {
             let (s1, ty_binder) = infer(ctx, binding);
-            let scheme = Scheme { vars: vec![], ty: apply_subst(&s1, &ty_binder) };
+            let scheme = generalize(apply_subst_ctx(&s1, ctx.clone()), ty_binder);
             let mut tmp_ctx = ctx.clone();
             tmp_ctx.insert(binder.clone(), scheme);
-            let (s2, ty_body) = infer(&apply_subst_ctx(&s1, tmp_ctx), body);
+            let (s2, ty_body) = infer(&apply_subst_ctx(&s1, tmp_ctx.clone()), body);
             (compose_subst(&s2, &s1), ty_body)
         }
     }
 }
 
+/// infer type with context of expression, can still contain free vars
 pub fn type_inference(ctx: &Context, expr: &Expr) -> Type {
     let (s, t) = infer(ctx, expr);
     apply_subst(&s, &t)
 }
 
+/// Some predefined functions creating a context:
+/// {
+///   "identity" => ∀ "a". ("a" -> "a"),
+///   "const" => ∀ "a" "b". ("a" -> "b" -> "a"),
+///   "add" => Int -> Int -> Int,
+///   "gte" => Int -> Int -> Bool,
+///   "if" => ∀ "a". (Bool -> "a" -> "a")
+/// }
 pub fn primitives() -> Context {
     use Type::*;
     let mut ctx = Context::new();
@@ -203,6 +271,9 @@ pub fn primitives() -> Context {
     ctx
 }
 
+/// main type check function,
+/// returns the most general type for the given expression (using the context given by primitives),
+/// or panics otherwise (type error)
 pub fn test_type_inference(expr: &Expr) -> Scheme {
-    generalize(HashMap::new(), type_inference(&primitives(), expr))
+    generalize(BTreeMap::new(), type_inference(&primitives(), expr))
 }

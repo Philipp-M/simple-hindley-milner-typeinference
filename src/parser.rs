@@ -80,73 +80,78 @@ pub fn parse(source: &str) -> Expr {
     parser().parse(lexer().parse(source).unwrap()).unwrap()
 }
 
-#[test]
-fn parses_literals() {
-    assert_eq!(parser().parse(lexer().parse("(123)").unwrap()), Ok(Expr::Lit(Lit::Int(123))));
-    assert_eq!(parse("((true))"), Expr::Lit(Lit::Bool(true)));
-    assert_eq!(parse("false"), Expr::Lit(Lit::Bool(false)));
-}
+#[cfg(test)]
+mod test {
+    use super::*;
 
-#[test]
-fn parses_lambda() {
-    assert_eq!(parse("\\x -> x"), Expr::Lam("x".into(), Box::new(Expr::Var("x".into()))));
-    assert_eq!(
-        parse("\\hello -> \\world -> 42"),
-        Expr::Lam(
-            "hello".into(),
-            Box::new(Expr::Lam("world".into(), Box::new(Expr::Lit(Lit::Int(42)))))
-        )
-    );
-}
+    #[test]
+    fn parses_literals() {
+        assert_eq!(parser().parse(lexer().parse("(123)").unwrap()), Ok(Expr::Lit(Lit::Int(123))));
+        assert_eq!(parse("((true))"), Expr::Lit(Lit::Bool(true)));
+        assert_eq!(parse("false"), Expr::Lit(Lit::Bool(false)));
+    }
 
-#[test]
-fn parses_let_in() {
-    assert_eq!(
-        parse("let hello = 8 in 9"),
-        Expr::Let(
-            "hello".into(),
-            Box::new(Expr::Lit(Lit::Int(8))),
-            Box::new(Expr::Lit(Lit::Int(9)))
-        )
-    );
-    assert_eq!(
-        parse("(let hello = true in hello)"),
-        Expr::Let(
-            "hello".into(),
+    #[test]
+    fn parses_lambda() {
+        assert_eq!(parse("\\x -> x"), Expr::Lam("x".into(), Box::new(Expr::Var("x".into()))));
+        assert_eq!(
+            parse("\\hello -> \\world -> 42"),
+            Expr::Lam(
+                "hello".into(),
+                Box::new(Expr::Lam("world".into(), Box::new(Expr::Lit(Lit::Int(42)))))
+            )
+        );
+    }
+
+    #[test]
+    fn parses_let_in() {
+        assert_eq!(
+            parse("let hello = 8 in 9"),
+            Expr::Let(
+                "hello".into(),
+                Box::new(Expr::Lit(Lit::Int(8))),
+                Box::new(Expr::Lit(Lit::Int(9)))
+            )
+        );
+        assert_eq!(
+            parse("(let hello = true in hello)"),
+            Expr::Let(
+                "hello".into(),
+                Box::new(Expr::Lit(Lit::Bool(true))),
+                Box::new(Expr::Var("hello".into()))
+            )
+        );
+    }
+
+    #[test]
+    fn parses_application() {
+        let app = Expr::App(
+            Box::new(Expr::App(
+                Box::new(Expr::App(
+                    Box::new(Expr::Var("hello".into())),
+                    Box::new(Expr::Lit(Lit::Int(1))),
+                )),
+                Box::new(Expr::Var("world".into())),
+            )),
             Box::new(Expr::Lit(Lit::Bool(true))),
-            Box::new(Expr::Var("hello".into()))
-        )
-    );
-}
+        );
 
-#[test]
-fn parses_application() {
-    let app = Expr::App(
-        Box::new(Expr::App(
-            Box::new(Expr::App(
-                Box::new(Expr::Var("hello".into())),
-                Box::new(Expr::Lit(Lit::Int(1))),
-            )),
-            Box::new(Expr::Var("world".into())),
-        )),
-        Box::new(Expr::Lit(Lit::Bool(true))),
-    );
+        assert_eq!(parse("((hello 1) world) true"), app);
+        assert_eq!(parse("hello 1 world true"), app);
+    }
 
-    assert_eq!(parse("((hello 1) world) true"), app);
-    assert_eq!(parse("hello 1 world true"), app);
-}
-
-#[test]
-fn parses_combined_expression() {
-    assert_eq!(
-        parse("let id = \\x -> x in id 42"),
-        Expr::Let(
-            "id".into(),
-            Box::new(Expr::Lam("x".into(), Box::new(Expr::Var("x".into())))),
-            Box::new(Expr::App(
-                Box::new(Expr::Var("id".into())),
-                Box::new(Expr::Lit(Lit::Int(42)))
-            )),
-        )
-    );
+    #[test]
+    fn parses_combined_expression() {
+        assert_eq!(
+            parse("let id = \\x -> x in id 42"),
+            Expr::Let(
+                "id".into(),
+                Box::new(Expr::Lam("x".into(), Box::new(Expr::Var("x".into())))),
+                Box::new(Expr::App(
+                    Box::new(Expr::Var("id".into())),
+                    Box::new(Expr::Lit(Lit::Int(42)))
+                )),
+            )
+        );
+    }
 }
