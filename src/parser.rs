@@ -40,7 +40,7 @@ fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
 
     let comment = just("#").then(take_until(just('\n'))).padded();
 
-    token.padded_by(comment.repeated()).padded().repeated()
+    token.padded_by(comment.repeated()).padded().repeated().then_ignore(end())
 }
 
 fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone {
@@ -73,11 +73,13 @@ fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone {
         // <expr> <expr>
         atom.clone().then(atom.repeated()).foldl(|e1, e2| Expr::App(e1.into(), e2.into()))
     })
+    .then_ignore(end())
 }
 
 // TODO error handling
 pub fn parse(source: &str) -> Expr {
-    parser().parse(lexer().parse(source).unwrap()).unwrap()
+    let tokens = lexer().parse(source).unwrap();
+    parser().parse(tokens).unwrap()
 }
 
 #[cfg(test)]
