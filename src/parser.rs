@@ -16,8 +16,12 @@ enum Token {
 }
 
 fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
-    let num = text::int(10)
-        .chain::<char, _, _>(just('.').chain(text::digits(10)).or_not().flatten())
+    let num = just('-')
+        .or_not()
+        .map(|e| e.into_iter().collect::<Vec<_>>())
+        .chain::<char, _, _>(
+            text::int(10).chain::<char, _, _>(just('.').chain(text::digits(10)).or_not().flatten()),
+        )
         .collect::<String>()
         .map(|n| Token::Number(n.parse().unwrap()));
 
@@ -145,13 +149,13 @@ mod test {
     #[test]
     fn parses_combined_expression() {
         assert_eq!(
-            parse("let id = \\x -> x in id 42"),
+            parse("let id = \\x -> x in id -42"),
             Expr::Let(
                 "id".into(),
                 Box::new(Expr::Lam("x".into(), Box::new(Expr::Var("x".into())))),
                 Box::new(Expr::App(
                     Box::new(Expr::Var("id".into())),
-                    Box::new(Expr::Lit(Lit::Int(42)))
+                    Box::new(Expr::Lit(Lit::Int(-42)))
                 )),
             )
         );
