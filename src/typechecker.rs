@@ -224,8 +224,10 @@ pub fn type_inference(ctx: &Context, expr: &Expr) -> Type {
 /// Some predefined functions creating a context:
 /// {
 ///   "identity" => ∀ "a". ("a" -> "a"),
+///   "fix" => ∀ "a". ("a" -> "a") -> "a",
 ///   "const" => ∀ "a" "b". ("a" -> "b" -> "a"),
 ///   "add" => Int -> Int -> Int,
+///   "mul" => Int -> Int -> Int,
 ///   "gte" => Int -> Int -> Bool,
 ///   "if" => ∀ "a". (Bool -> "a" -> "a")
 /// }
@@ -235,6 +237,16 @@ pub fn primitives() -> Context {
     ctx.insert(
         "identity".into(),
         Scheme { vars: vec!["a".into()], ty: Fun(Var("a".into()).into(), Var("a".into()).into()) },
+    );
+    ctx.insert(
+        "fix".into(),
+        Scheme {
+            vars: vec!["a".into()],
+            ty: Fun(
+                Fun(Var("a".into()).into(), Var("a".into()).into()).into(),
+                Var("a".into()).into(),
+            ),
+        },
     );
     ctx.insert(
         "const".into(),
@@ -248,6 +260,10 @@ pub fn primitives() -> Context {
     );
     ctx.insert(
         "add".into(),
+        Scheme { vars: vec![], ty: Fun(Int.into(), Fun(Int.into(), Int.into()).into()) },
+    );
+    ctx.insert(
+        "mul".into(),
         Scheme { vars: vec![], ty: Fun(Int.into(), Fun(Int.into(), Int.into()).into()) },
     );
     ctx.insert(
