@@ -60,5 +60,17 @@ mod test {
             "forall a b. a -> b -> Int -> Int -> Int",
             ty("let x = \\x -> \\b -> \\c -> identity x in let y = x add in y")
         );
+        // recursion with fixed point operator (works without modifying original hindley milner)
+        assert_eq!(
+            "Int -> Int",
+            ty("let factorial = fix (\\fact -> \\n -> if (gte n 2) (mul n (fact (add n -1))) 1) in factorial")
+        );
+        // recursion without fixed point operator
+        assert_eq!(
+            "Int -> Int",
+            ty("let fact = \\n -> if (gte n 2) (mul n (fact (add n -1))) 1 in fact")
+        );
+        assert_eq!(ty("fix"), ty("let fx = fix \\fix -> (\\f -> f (fix f)) in fx"));
+        assert_eq!(ty("fix"), ty("let fix = \\f -> f (fix f) in fix"));
     }
 }
