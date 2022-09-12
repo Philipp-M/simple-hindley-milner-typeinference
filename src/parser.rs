@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Lit};
+use crate::ast::{Expr, LetBinding, Lit};
 use chumsky::prelude::*;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Hash)]
@@ -6,6 +6,7 @@ enum Token {
     Let,
     In,
     Eq,
+    Comma,
     LParen,
     RParen,
     Arrow,
@@ -34,13 +35,15 @@ fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
     });
 
     let eq = just('=').map(|_| Token::Eq);
+    let comma = just(',').map(|_| Token::Comma);
     let arrow = just("->").map(|_| Token::Arrow);
     let l_paren = just('(').map(|_| Token::LParen);
     let r_paren = just(')').map(|_| Token::RParen);
     let lambda = just('\\').map(|_| Token::Lambda);
 
     // A single token can be one of the above
-    let token = num.or(eq).or(arrow).or(l_paren).or(r_paren).or(arrow).or(lambda).or(ident);
+    let token =
+        num.or(eq).or(comma).or(arrow).or(l_paren).or(r_paren).or(arrow).or(lambda).or(ident);
 
     let comment = just("#").then(take_until(just('\n'))).padded();
 
@@ -56,15 +59,21 @@ fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone {
         };
 
         let ident = select! { Token::Ident(ident) => ident };
-        let let_in = just(Token::Let)
-            .ignore_then(ident)
+        let let_bindings = ident
             .then_ignore(just(Token::Eq))
             .then(expr.clone())
-            .then_ignore(just(Token::In))
-            .then(expr.clone())
-            .map(|((name, let_body), in_body)| {
-                Expr::Let(name, Box::new(let_body), Box::new(in_body))
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .map(|bindings| {
+                bindings
+                    .into_iter()
+                    .map(|(binder, binding)| LetBinding { binder, binding })
+                    .collect()
             });
+        let let_in = let_bindings
+            .delimited_by(just(Token::Let), just(Token::In))
+            .then(expr.clone())
+            .map(|(bindings, body)| Expr::Let(bindings, body.into()));
         // \x -> x
         let lambda = just(Token::Lambda)
             .ignore_then(ident)
@@ -114,16 +123,35 @@ mod test {
         assert_eq!(
             parse("let hello = 8 in 9"),
             Expr::Let(
-                "hello".into(),
-                Box::new(Expr::Lit(Lit::Int(8))),
+                vec![LetBinding { binder: "hello".into(), binding: Expr::Lit(Lit::Int(8)) }],
                 Box::new(Expr::Lit(Lit::Int(9)))
             )
         );
         assert_eq!(
             parse("(let hello = true in hello)"),
             Expr::Let(
-                "hello".into(),
-                Box::new(Expr::Lit(Lit::Bool(true))),
+                vec![LetBinding { binder: "hello".into(), binding: Expr::Lit(Lit::Bool(true)) }],
+                Box::new(Expr::Var("hello".into()))
+            )
+        );
+        assert_eq!(
+            parse("(let hello = true, world = 10 in hello)"),
+            Expr::Let(
+                vec![
+                    LetBinding { binder: "hello".into(), binding: Expr::Lit(Lit::Bool(true)) },
+                    LetBinding { binder: "world".into(), binding: Expr::Lit(Lit::Int(10)) }
+                ],
+                Box::new(Expr::Var("hello".into()))
+            )
+        );
+        assert_eq!(
+            parse("(let hello = true, world = 10, trailing = true, in hello)"),
+            Expr::Let(
+                vec![
+                    LetBinding { binder: "hello".into(), binding: Expr::Lit(Lit::Bool(true)) },
+                    LetBinding { binder: "world".into(), binding: Expr::Lit(Lit::Int(10)) },
+                    LetBinding { binder: "trailing".into(), binding: Expr::Lit(Lit::Bool(true)) }
+                ],
                 Box::new(Expr::Var("hello".into()))
             )
         );
@@ -151,8 +179,10 @@ mod test {
         assert_eq!(
             parse("let id = \\x -> x in id -42"),
             Expr::Let(
-                "id".into(),
-                Box::new(Expr::Lam("x".into(), Box::new(Expr::Var("x".into())))),
+                vec![LetBinding {
+                    binder: "id".into(),
+                    binding: Expr::Lam("x".into(), Box::new(Expr::Var("x".into())))
+                }],
                 Box::new(Expr::App(
                     Box::new(Expr::Var("id".into())),
                     Box::new(Expr::Lit(Lit::Int(-42)))

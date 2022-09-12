@@ -6,7 +6,13 @@ pub enum Expr {
     Lit(Lit),
     App(Box<Expr>, Box<Expr>),
     Lam(String, Box<Expr>),
-    Let(String, Box<Expr>, Box<Expr>),
+    Let(Vec<LetBinding>, Box<Expr>),
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
+pub struct LetBinding {
+    pub binder: String,
+    pub binding: Expr,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
@@ -43,7 +49,24 @@ impl Display for Expr {
                 }
             }
             Expr::Lam(n, b) => write!(f, "\\{n} -> {b}"),
-            Expr::Let(n, e1, e2) => write!(f, "let {n} = {e1} in\n{e2}"),
+            Expr::Let(bindings, body) => {
+                assert!(!bindings.is_empty());
+                let len = bindings.len();
+                write!(f, "let ")?;
+                for (i, LetBinding { binder, binding }) in bindings.iter().enumerate() {
+                    if i == len - 1 {
+                        // only one binding
+                        if i == 0 {
+                            write!(f, "{binder} = {binding} ")?;
+                        } else {
+                            writeln!(f, "{binder} = {binding}")?;
+                        }
+                    } else {
+                        write!(f, "{binder} = {binding},\n    ")?;
+                    }
+                }
+                write!(f, "in\n{body}")
+            }
         }
     }
 }

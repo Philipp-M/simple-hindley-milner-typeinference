@@ -3,7 +3,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::ast::{Expr, Lit, Scheme, Type};
+use crate::ast::{Expr, LetBinding, Lit, Scheme, Type};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -204,20 +204,36 @@ fn infer(ctx: &Context, expr: &Expr) -> (Substitution, Type) {
             let ty_fun = Type::Fun(apply_subst(&s1, &ty_binder).into(), ty_body.into());
             (s1, ty_fun)
         }
-        Expr::Let(binder, binding, body) => {
+        Expr::Let(bindings, body) => {
             let mut ctx_binding = ctx.clone();
-            // let infer get the type of this binding, if it occurs in the body
-            let rec_binding = Scheme { vars: vec![], ty: new_ty_var() };
-            ctx_binding.insert(binder.clone(), rec_binding.clone());
-            let (s1, ty_binder) = infer(&ctx_binding, binding);
-            let s = unify(&apply_subst_scheme(&s1, rec_binding).ty, &ty_binder);
+            let mut binder_set = BTreeSet::new();
+            for LetBinding { binder, .. } in bindings {
+                if binder_set.contains(binder) {
+                    panic!("{binder} was redefined!, only one definition per binder is allowed in a let expression");
+                }
+                binder_set.insert(binder.clone());
+                // let infer get the type of this binding, if it occurs in one of the binding expressions
+                ctx_binding.insert(binder.clone(), Scheme { vars: vec![], ty: new_ty_var() });
+            }
+            let mut binder_tys = BTreeMap::new();
+            let mut s = Substitution::new();
+            for LetBinding { binder, binding } in bindings {
+                ctx_binding = apply_subst_ctx(&s, ctx_binding);
+                let (s1, binder_ty) = infer(&ctx_binding, binding);
+                s = compose_subst(&s1, &s);
+                s = compose_subst(
+                    &unify(&apply_subst(&s, &ctx_binding[binder].ty), &binder_ty),
+                    &s,
+                );
+                binder_tys.insert(binder.clone(), binder_ty);
+            }
             let mut ctx_body = ctx.clone();
-            let s3 = compose_subst(&s, &s1);
-            let scheme =
-                generalize(apply_subst_ctx(&s3, ctx.clone()), apply_subst(&s3, &ty_binder));
-            ctx_body.insert(binder.clone(), scheme);
+            for LetBinding { binder, .. } in bindings {
+                let scheme = generalize(ctx.clone(), apply_subst(&s, &binder_tys[binder]));
+                ctx_body.insert(binder.clone(), scheme);
+            }
             let (s2, ty_body) = infer(&ctx_body, body);
-            (compose_subst(&s2, &s3), ty_body)
+            (compose_subst(&s2, &s), ty_body)
         }
     }
 }

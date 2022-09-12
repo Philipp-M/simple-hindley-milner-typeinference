@@ -72,5 +72,45 @@ mod test {
         );
         assert_eq!(ty("fix"), ty("let fx = fix \\fix -> (\\f -> f (fix f)) in fx"));
         assert_eq!(ty("fix"), ty("let fix = \\f -> f (fix f) in fix"));
+        // mutual recursion
+        assert_eq!(
+            "Int -> Bool",
+            ty("
+            let even = \\n -> if (gte 1 n) (odd (add -1 n)) true,
+                odd = \\n -> if (gte 1 n) (odd (add -1 n)) false in even
+        ")
+        );
+        assert_eq!(
+            "Int -> Int",
+            ty("
+            let f = \\n -> h 1,
+                h = \\x -> 0,
+                g = \\n -> h 0,
+            in h
+        ")
+        );
+        assert_eq!(
+            "forall a. a -> Int",
+            ty("
+            let f = \\n -> h 1,
+                h = \\x -> 0,
+                g = \\n -> h 0,
+            in g
+        ")
+        );
+        // recursion in hindley milner inference generally fails to find bottom
+        assert_eq!("forall a. a", ty("let f = h, h = f in f"));
+        assert_eq!(
+            "Int",
+            ty("
+            let a = b,
+                e = f,
+                b = c,
+                f = 0,
+                d = e,
+                c = d,
+            in add a d
+        ")
+        );
     }
 }
